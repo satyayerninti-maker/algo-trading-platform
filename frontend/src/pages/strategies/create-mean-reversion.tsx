@@ -38,7 +38,16 @@ export default function CreateMeanReversion() {
         setScanResults(response.data.scan_results)
         setStep('scan')
       } else {
-        setScanError('No stocks matching criteria found. Try adjusting parameters.')
+        const errorCount = response.data.errors?.length || 0
+        const errorPreview = response.data.errors?.slice(0, 3)
+          ?.map((item: any) => `${item.symbol}: ${item.error}`)
+          ?.join(' | ')
+
+        setScanError(
+          errorCount > 0
+            ? `Scan completed with no matches. ${errorCount} symbols failed. ${errorPreview}`
+            : 'No stocks matching criteria found using Zerodha historical data.'
+        )
       }
     } catch (error: any) {
       console.error('[MeanReversion] Scan error:', error)

@@ -1,8 +1,10 @@
-import requests
+import csv
 import hashlib
-import json
+import io
+import requests
+from datetime import date, datetime
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+
 from app.core.config import settings
 
 
@@ -11,6 +13,7 @@ class ZerodhaClient:
 
     BASE_URL = "https://api.kite.trade"
     LOGIN_URL = "https://kite.zerodha.com/connect/login"
+    _instrument_cache: Dict[str, Dict[str, Any]] = {}
 
     def __init__(self, api_key: str, api_secret: str, access_token: str = None):
         self.api_key = api_key
@@ -71,6 +74,13 @@ class ZerodhaClient:
     def set_access_token(self, access_token: str):
         """Set the access token for authenticated requests."""
         self.access_token = access_token
+
+    @staticmethod
+    def _normalize_quote_symbol(symbol: str) -> str:
+        """Normalize raw equity symbols to Kite's exchange:tradingsymbol format."""
+        if ":" in symbol:
+            return symbol
+        return f"NSE:{symbol}"
 
     def _get_headers(self) -> Dict[str, str]:
         """Get headers for requests."""
@@ -196,18 +206,102 @@ class ZerodhaClient:
             raise Exception(f"Failed to fetch orders: {str(e)}")
 
     def get_quote(self, symbols: List[str]) -> Dict[str, Any]:
-        """Get live quotes for symbols."""
+        """Get live quotes for symbols.
+
+        Accepts either Kite-format symbols like ``NSE:INFY`` or raw equity
+        symbols like ``INFY`` and normalizes them for the request.
+        """
         url = f"{self.BASE_URL}/quote"
+        normalized_symbols = [self._normalize_quote_symbol(symbol) for symbol in symbols]
         params = {
-            "i": symbols,
+            "i": normalized_symbols,
         }
 
         try:
             response = self.session.get(url, params=params, headers=self._get_headers())
             response.raise_for_status()
-            return response.json()
+            payload = response.json()
+
+            # Preserve raw symbol access for existing callers.
+            data = payload.get("data")
+            if isinstance(data, dict):
+                for raw_symbol, normalized_symbol in zip(symbols, normalized_symbols):
+                    if raw_symbol != normalized_symbol and normalized_symbol in data:
+                        data[raw_symbol] = data[normalized_symbol]
+
+            return payload
         except requests.RequestException as e:
             raise Exception(f"Failed to fetch quote: {str(e)}")
+
+    def get_instruments(self, exchange: Optional[str] = None) -> str:
+        """Fetch the instruments CSV dump from Kite."""
+        if exchange:
+            url = f"{self.BASE_URL}/instruments/{exchange}"
+        else:
+            url = f"{self.BASE_URL}/instruments"
+
+        try:
+            response = self.session.get(url, headers=self._get_headers())
+            response.raise_for_status()
+            return response.text
+        except requests.RequestException as e:
+            raise Exception(f"Failed to fetch instruments: {str(e)}")
+
+    def get_instrument_map(self, exchange: str = "NSE") -> Dict[str, Dict[str, Any]]:
+        """Return a tradingsymbol -> instrument row map, cached for the day."""
+        cache_key = f"{exchange}:{date.today().isoformat()}"
+        cached = self._instrument_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        csv_text = self.get_instruments(exchange)
+        reader = csv.DictReader(io.StringIO(csv_text))
+        instrument_map: Dict[str, Dict[str, Any]] = {}
+
+        for row in reader:
+            tradingsymbol = row.get("tradingsymbol")
+            instrument_type = row.get("instrument_type")
+            row_exchange = row.get("exchange")
+            segment = row.get("segment")
+            if not tradingsymbol or row_exchange != exchange:
+                continue
+
+            # For equities, keep only the cash market symbols.
+            if instrument_type and instrument_type != "EQ":
+                continue
+            if segment and segment not in {exchange, f"{exchange}-{instrument_type}"}:
+                continue
+
+            instrument_map[tradingsymbol] = row
+
+        self._instrument_cache[cache_key] = instrument_map
+        return instrument_map
+
+    def get_historical_data(
+        self,
+        instrument_token: int,
+        interval: str,
+        from_date: datetime,
+        to_date: datetime,
+        continuous: bool = False,
+        oi: bool = False,
+    ) -> List[List[Any]]:
+        """Fetch historical candle data for an instrument token."""
+        url = f"{self.BASE_URL}/instruments/historical/{instrument_token}/{interval}"
+        params = {
+            "from": from_date.strftime("%Y-%m-%d %H:%M:%S"),
+            "to": to_date.strftime("%Y-%m-%d %H:%M:%S"),
+            "continuous": 1 if continuous else 0,
+            "oi": 1 if oi else 0,
+        }
+
+        try:
+            response = self.session.get(url, params=params, headers=self._get_headers())
+            response.raise_for_status()
+            payload = response.json()
+            return payload.get("data", {}).get("candles", [])
+        except requests.RequestException as e:
+            raise Exception(f"Failed to fetch historical data: {str(e)}")
 
     def get_user_profile(self) -> Dict[str, Any]:
         """Get user profile details."""

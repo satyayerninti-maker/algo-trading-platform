@@ -1,6 +1,9 @@
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+
 from app.database.db import get_db
 from app.database import crud
 from app.core.security import verify_token
@@ -8,8 +11,6 @@ from app.schemas import StrategyCreate, StrategyResponse
 from app.core.rate_limiter import kite_limiter
 from app.broker.zerodha_client import ZerodhaClient
 from app.core.config import settings
-import random
-import datetime
 
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
 
@@ -170,6 +171,82 @@ NIFTY_200_STOCKS = [
     "HINDPETRO", "SIEMENS", "BANKBARODA", "NTPC", "NMDC",
 ]
 
+SCAN_UNIVERSE_LIMIT = 50
+
+
+def _get_authenticated_zerodha_client(
+    token: str, db: Session
+) -> tuple[int, ZerodhaClient]:
+    """Validate token and return an authenticated Zerodha client."""
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+        )
+
+    user_id = payload.get("user_id")
+    broker_account = crud.get_broker_account(db, user_id, "zerodha")
+    if not broker_account or not broker_account.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Zerodha account not linked. Please connect your broker in Settings first.",
+        )
+
+    client = ZerodhaClient(
+        api_key=settings.ZERODHA_API_KEY,
+        api_secret=settings.ZERODHA_API_SECRET,
+        access_token=broker_account.access_token,
+    )
+    return user_id, client
+
+
+def _extract_close_prices(candles: List[List[Any]]) -> List[float]:
+    """Extract close prices from Kite historical candles."""
+    closes: List[float] = []
+    for candle in candles:
+        if len(candle) >= 5:
+            closes.append(float(candle[4]))
+    return closes
+
+
+def _scan_symbol_with_history(
+    client: ZerodhaClient,
+    instrument_map: Dict[str, Dict[str, Any]],
+    symbol: str,
+) -> Optional[Dict[str, Any]]:
+    """Fetch day candles for a symbol and compute scan inputs."""
+    instrument = instrument_map.get(symbol)
+    if not instrument:
+        raise ValueError(f"Instrument token not found for {symbol}")
+
+    instrument_token = instrument.get("instrument_token")
+    if not instrument_token:
+        raise ValueError(f"Missing instrument token for {symbol}")
+
+    to_date = datetime.now().replace(hour=23, minute=59, second=59, microsecond=0)
+    from_date = to_date - timedelta(days=420)
+
+    candles = client.get_historical_data(
+        instrument_token=int(instrument_token),
+        interval="day",
+        from_date=from_date,
+        to_date=to_date,
+    )
+    closes = _extract_close_prices(candles)
+    if len(closes) < 200:
+        raise ValueError(f"Not enough historical candles for {symbol}")
+
+    current_price = closes[-1]
+    return {
+        "symbol": symbol,
+        "current_price": round(current_price, 2),
+        "sma_50": round(calculate_sma(closes, 50), 2),
+        "sma_200": round(calculate_sma(closes, 200), 2),
+        "rsi_4": round(calculate_rsi(closes, 4), 2),
+        "close_count": len(closes),
+    }
+
 
 def calculate_sma(prices: List[float], period: int) -> float:
     """Calculate Simple Moving Average."""
@@ -224,97 +301,33 @@ def scan_mean_reversion_stocks(token: str, db: Session = Depends(get_db)):
     Requires Zerodha account to be linked. No mock data fallback.
     """
     try:
-        # Verify token
-        payload = verify_token(token)
-        if not payload:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token",
-            )
-
-        user_id = payload.get("user_id")
-
-        # Get user's Zerodha broker account
-        broker_account = crud.get_broker_account(db, user_id, "zerodha")
-        if not broker_account or not broker_account.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Zerodha account not linked. Please connect your broker in Settings first.",
-            )
-
-        # Initialize Zerodha client with rate limiter
-        print("[DEBUG] Scanning stocks using Zerodha API...")
-        client = ZerodhaClient(
-            api_key=settings.ZERODHA_API_KEY,
-            api_secret=settings.ZERODHA_API_SECRET,
-            access_token=broker_account.access_token,
-        )
+        _, client = _get_authenticated_zerodha_client(token, db)
+        instrument_map = client.get_instrument_map("NSE")
 
         scan_results = []
         errors = []
+        scanned_symbols = 0
 
-        # Scan top stocks (expanded to include more like NTPC at index 48)
-        for symbol in NIFTY_200_STOCKS[:50]:  # Scan first 50 stocks
+        for symbol in NIFTY_200_STOCKS[:SCAN_UNIVERSE_LIMIT]:
             try:
-                # Apply rate limiting (Zerodha: 3 req/sec, 100 req/min)
                 kite_limiter.wait_if_needed()
-
-                print(f"[Scan] Fetching data for {symbol}...")
-
-                current_price = None
-
-                # Get live quote
-                try:
-                    quote_response = client.get_quote([symbol + "-EQ"])
-                    if quote_response and quote_response.get("data"):
-                        quote_data = quote_response["data"].get(symbol + "-EQ")
-                        if quote_data:
-                            current_price = quote_data.get("last_price", None)
-                            if current_price:
-                                print(f"[Scan] Got price for {symbol}: ₹{current_price}")
-                except Exception as e:
-                    print(f"[Scan] Warning: Could not fetch quote for {symbol}: {e}")
-
-                # If price fetch failed, skip this stock
-                if not current_price or current_price == 0:
-                    print(f"[Scan] Skipping {symbol} - no price data")
-                    continue
-
-                # Simulate technical analysis with real price
-                # In production, fetch historical data and calculate
-                sma200 = current_price * random.uniform(0.95, 1.05)
-                rsi4 = random.uniform(5, 35)  # Mock RSI between 5-35
-                above_sma = current_price > sma200
-
-                print(f"[Scan] {symbol}: Price=₹{current_price}, SMA200=₹{sma200:.2f}, RSI4={rsi4:.2f}, AboveSMA={above_sma}")
-
-                # Filter by criteria
-                if rsi4 < 20 and above_sma:
+                scanned_symbols += 1
+                metrics = _scan_symbol_with_history(client, instrument_map, symbol)
+                above_sma = metrics["current_price"] > metrics["sma_200"]
+                if metrics["rsi_4"] < 20 and above_sma:
                     scan_results.append({
                         "symbol": symbol,
-                        "current_price": round(current_price, 2),
-                        "sma_200": round(sma200, 2),
-                        "rsi_4": round(rsi4, 2),
+                        "current_price": metrics["current_price"],
+                        "sma_200": metrics["sma_200"],
+                        "rsi_4": metrics["rsi_4"],
                         "above_sma_200": above_sma,
                     })
-                    print(f"[Scan] ✓ {symbol} MATCHES criteria (RSI4: {rsi4:.2f})")
-                else:
-                    print(f"[Scan] ✗ {symbol} does NOT match (RSI4={rsi4:.2f}<20? {rsi4 < 20}, AboveSMA200? {above_sma})")
-
             except Exception as e:
-                print(f"[Scan] Error processing {symbol}: {str(e)}")
                 errors.append({"symbol": symbol, "error": str(e)})
                 continue
 
-        # Sort by RSI4 (ascending) and take top 5
         scan_results.sort(key=lambda x: x["rsi_4"])
         top_5 = scan_results[:5]
-
-        print(f"[Scan] ========================================")
-        print(f"[Scan] FINAL RESULTS: Found {len(top_5)} stocks matching criteria out of {len(scan_results)} total matches")
-        for result in top_5:
-            print(f"[Scan] - {result['symbol']}: RSI4={result['rsi_4']}, Price=₹{result['current_price']}, SMA200=₹{result['sma_200']}")
-        print(f"[Scan] ========================================")
 
         return {
             "status": "success",
@@ -325,10 +338,11 @@ def scan_mean_reversion_stocks(token: str, db: Session = Depends(get_db)):
                 "top_count": 5,
             },
             "scan_results": top_5,
-            "total_scanned": min(20, len(NIFTY_200_STOCKS)),
+            "total_scanned": scanned_symbols,
             "total_matched": len(scan_results),
             "data_source": "zerodha",
-            "timestamp": str(__import__('datetime').datetime.now()),
+            "errors": errors,
+            "timestamp": datetime.now().isoformat(),
         }
 
     except HTTPException:
@@ -352,97 +366,37 @@ def scan_golden_cross_stocks(token: str, db: Session = Depends(get_db)):
     Requires Zerodha account to be linked. No mock data fallback.
     """
     try:
-        # Verify token
-        payload = verify_token(token)
-        if not payload:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token",
-            )
-
-        user_id = payload.get("user_id")
-
-        # Get user's Zerodha broker account
-        broker_account = crud.get_broker_account(db, user_id, "zerodha")
-        if not broker_account or not broker_account.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Zerodha account not linked. Please connect your broker in Settings first.",
-            )
-
-        # Initialize Zerodha client with rate limiter
-        print("[DEBUG] Scanning for Golden Cross stocks using Zerodha API...")
-        client = ZerodhaClient(
-            api_key=settings.ZERODHA_API_KEY,
-            api_secret=settings.ZERODHA_API_SECRET,
-            access_token=broker_account.access_token,
-        )
+        _, client = _get_authenticated_zerodha_client(token, db)
+        instrument_map = client.get_instrument_map("NSE")
 
         scan_results = []
         errors = []
+        scanned_symbols = 0
 
-        # Scan top stocks (expanded to include more like NTPC at index 48)
-        for symbol in NIFTY_200_STOCKS[:50]:  # Scan first 50 stocks
+        for symbol in NIFTY_200_STOCKS[:SCAN_UNIVERSE_LIMIT]:
             try:
-                # Apply rate limiting (Zerodha: 3 req/sec, 100 req/min)
                 kite_limiter.wait_if_needed()
-
-                print(f"[Scan] Fetching data for {symbol}...")
-
-                current_price = None
-
-                # Get live quote
-                try:
-                    quote_response = client.get_quote([symbol + "-EQ"])
-                    if quote_response and quote_response.get("data"):
-                        quote_data = quote_response["data"].get(symbol + "-EQ")
-                        if quote_data:
-                            current_price = quote_data.get("last_price", None)
-                            if current_price:
-                                print(f"[Scan] Got price for {symbol}: ₹{current_price}")
-                except Exception as e:
-                    print(f"[Scan] Warning: Could not fetch quote for {symbol}: {e}")
-
-                # If price fetch failed, skip this stock
-                if not current_price or current_price == 0:
-                    print(f"[Scan] Skipping {symbol} - no price data")
-                    continue
-
-                # Simulate technical analysis with real price
-                # In production, fetch historical data and calculate actual SMAs
-                sma50 = current_price * random.uniform(0.98, 1.02)
-                sma200 = current_price * random.uniform(0.95, 1.00)
-                golden_cross = sma50 > sma200
-
-                print(f"[Scan] {symbol}: Price=₹{current_price}, SMA50=₹{sma50:.2f}, SMA200=₹{sma200:.2f}, GoldenCross={golden_cross}")
-
-                # Filter by criteria - only show golden cross stocks
+                scanned_symbols += 1
+                metrics = _scan_symbol_with_history(client, instrument_map, symbol)
+                golden_cross = (
+                    metrics["sma_50"] > metrics["sma_200"]
+                    and metrics["current_price"] > metrics["sma_50"]
+                    and metrics["current_price"] > metrics["sma_200"]
+                )
                 if golden_cross:
                     scan_results.append({
                         "symbol": symbol,
-                        "current_price": round(current_price, 2),
-                        "sma_50": round(sma50, 2),
-                        "sma_200": round(sma200, 2),
+                        "current_price": metrics["current_price"],
+                        "sma_50": metrics["sma_50"],
+                        "sma_200": metrics["sma_200"],
                         "golden_cross": golden_cross,
                     })
-                    print(f"[Scan] ✓ {symbol} MATCHES Golden Cross (50-SMA: {sma50:.2f}, 200-SMA: {sma200:.2f})")
-                else:
-                    print(f"[Scan] ✗ {symbol} does NOT match (50-SMA > 200-SMA? {sma50 > sma200})")
-
             except Exception as e:
-                print(f"[Scan] Error processing {symbol}: {str(e)}")
                 errors.append({"symbol": symbol, "error": str(e)})
                 continue
 
-        # Sort by current price and take top stocks
         scan_results.sort(key=lambda x: x["current_price"], reverse=True)
         top_5 = scan_results[:5]
-
-        print(f"[Scan] ========================================")
-        print(f"[Scan] FINAL RESULTS: Found {len(top_5)} stocks with Golden Cross out of {len(scan_results)} total matches")
-        for result in top_5:
-            print(f"[Scan] - {result['symbol']}: Price=₹{result['current_price']}, SMA50=₹{result['sma_50']}, SMA200=₹{result['sma_200']}")
-        print(f"[Scan] ========================================")
 
         return {
             "status": "success",
@@ -452,10 +406,11 @@ def scan_golden_cross_stocks(token: str, db: Session = Depends(get_db)):
                 "top_count": 5,
             },
             "scan_results": top_5,
-            "total_scanned": min(50, len(NIFTY_200_STOCKS)),
+            "total_scanned": scanned_symbols,
             "total_matched": len(scan_results),
             "data_source": "zerodha",
-            "timestamp": str(datetime.datetime.now()),
+            "errors": errors,
+            "timestamp": datetime.now().isoformat(),
         }
 
     except HTTPException:
