@@ -178,9 +178,9 @@ class ApiClient {
     )
   }
 
-  async stopStrategy(activeStrategyId: number, userId: number, token: string) {
-    return this.client.post(`/api/execution/stop/${activeStrategyId}`, {}, {
-      params: { user_id: userId, token },
+  async stopStrategy(activeStrategyId: number, userId: number, token: string, closeTrades: boolean = false) {
+    return this.client.post(`/api/execution/stop/${activeStrategyId}`, null, {
+      params: { user_id: userId, token, close_trades: closeTrades },
     })
   }
 

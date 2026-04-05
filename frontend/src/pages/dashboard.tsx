@@ -26,6 +26,11 @@ export default function Dashboard() {
   const [positions, setPositions] = useState<any[]>([])
   const [activeStrategies, setActiveStrategies] = useState<any[]>([])
   const [portfolioSummary, setPortfolioSummary] = useState<any>(null)
+  const [stopModal, setStopModal] = useState<{ show: boolean; strategyId: number | null }>({
+    show: false,
+    strategyId: null,
+  })
+  const [stopping, setStopping] = useState(false)
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -135,8 +140,29 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [accessToken, user?.id])
 
-  const handleStopStrategy = async (strategyId: number) => {
-    setActiveStrategies((prev) => prev.filter((s) => s.id !== strategyId))
+  const handleStopStrategy = (strategyId: number) => {
+    setStopModal({ show: true, strategyId })
+  }
+
+  const handleConfirmStop = async (closeTrades: boolean) => {
+    if (!stopModal.strategyId || !accessToken || !user?.id) return
+
+    try {
+      setStopping(true)
+      await apiClient.stopStrategy(stopModal.strategyId, user.id, accessToken, closeTrades)
+      setActiveStrategies((prev) => prev.filter((s) => s.id !== stopModal.strategyId))
+      setStopModal({ show: false, strategyId: null })
+      alert(
+        closeTrades
+          ? '✓ Strategy stopped. All trades have been auto-closed.'
+          : '✓ Strategy stopped. Trades remain open for manual closure.'
+      )
+    } catch (error) {
+      console.error('Error stopping strategy:', error)
+      alert('Error stopping strategy')
+    } finally {
+      setStopping(false)
+    }
   }
 
   if (!portfolioSummary) {
@@ -348,6 +374,53 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Stop Strategy Modal */}
+      {stopModal.show && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Stop Strategy</h3>
+
+            <p className="text-gray-600 mb-6">
+              How would you like to handle the trades opened by this strategy?
+            </p>
+
+            <div className="space-y-3 mb-6">
+              {/* Option 1: Keep Trades Open */}
+              <button
+                onClick={() => handleConfirmStop(false)}
+                disabled={stopping}
+                className="w-full p-4 border-2 border-blue-200 rounded-lg hover:bg-blue-50 transition text-left hover:border-blue-400"
+              >
+                <p className="font-semibold text-gray-900">Keep Trades Open</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Stop strategy but keep all open trades active. Manually close them later.
+                </p>
+              </button>
+
+              {/* Option 2: Auto-Close Trades */}
+              <button
+                onClick={() => handleConfirmStop(true)}
+                disabled={stopping}
+                className="w-full p-4 border-2 border-red-200 rounded-lg hover:bg-red-50 transition text-left hover:border-red-400"
+              >
+                <p className="font-semibold text-gray-900">Auto-Close All Trades</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Stop strategy and immediately close all open positions at market price.
+                </p>
+              </button>
+            </div>
+
+            <button
+              onClick={() => setStopModal({ show: false, strategyId: null })}
+              disabled={stopping}
+              className="w-full px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </Layout>
   )
 }

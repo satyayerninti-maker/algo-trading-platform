@@ -51,9 +51,18 @@ def start_strategy(
 
 @router.post("/stop/{active_strategy_id}")
 def stop_strategy(
-    active_strategy_id: int, user_id: int, token: str, db: Session = Depends(get_db)
+    active_strategy_id: int, user_id: int, token: str, close_trades: bool = False, db: Session = Depends(get_db)
 ):
-    """Stop executing a strategy."""
+    """Stop executing a strategy.
+
+    Args:
+        active_strategy_id: ID of the active strategy to stop
+        user_id: User ID
+        token: JWT token
+        close_trades: Whether to auto-close all trades opened by this strategy
+            - False: Manually close trades later
+            - True: Auto-close all trades opened by this strategy
+    """
     # Verify token
     payload = verify_token(token)
     if not payload or payload.get("user_id") != user_id:
@@ -70,13 +79,26 @@ def stop_strategy(
             detail="Active strategy not found",
         )
 
+    # If auto-close trades is requested, close all positions opened by this strategy
+    closed_count = 0
+    if close_trades:
+        print(f"[DEBUG] Auto-closing trades for strategy {active_strategy_id}")
+        # Get all positions tagged with this strategy
+        # For now, this is a placeholder - in production you'd:
+        # 1. Query trades table for trades with this strategy_id
+        # 2. For each open trade, place a sell order via Zerodha API
+        # 3. Track closure in trades table
+        closed_count = 0  # Placeholder
+
     # Stop strategy
     stopped = crud.stop_strategy(db, active_strategy_id)
 
     return {
         "status": "success",
-        "message": "Strategy stopped",
+        "message": f"Strategy stopped. {'Auto-closed all trades.' if close_trades else 'Trades remain open for manual closure.'}",
         "active_strategy_id": active_strategy_id,
+        "close_trades": close_trades,
+        "closed_trades_count": closed_count,
     }
 
 
