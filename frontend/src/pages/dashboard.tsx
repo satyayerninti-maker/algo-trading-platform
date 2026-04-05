@@ -26,7 +26,6 @@ export default function Dashboard() {
   const [positions, setPositions] = useState<any[]>([])
   const [activeStrategies, setActiveStrategies] = useState<any[]>([])
   const [portfolioSummary, setPortfolioSummary] = useState<any>(null)
-  const [loading, setLoading] = useState(false)
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -43,8 +42,6 @@ export default function Dashboard() {
 
     const fetchData = async () => {
       try {
-        setLoading(true)
-
         // Fetch real positions and margins data from Zerodha
         const [positionsResponse, marginsResponse] = await Promise.all([
           apiClient.getZerodhaPositions(accessToken!).catch((err) => {
@@ -130,8 +127,6 @@ export default function Dashboard() {
           cash: 0,
         })
         setPositions([])
-      } finally {
-        setLoading(false)
       }
     }
 

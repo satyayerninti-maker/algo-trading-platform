@@ -129,6 +129,12 @@ class ApiClient {
     })
   }
 
+  async getZerodhaAnalytics(token: string, days: number = 30) {
+    return this.client.get('/api/broker/zerodha/analytics', {
+      params: { token, days },
+    })
+  }
+
   // Strategy endpoints
   async createStrategy(strategy: any, userId: number, token: string) {
     return this.client.post('/api/strategies', strategy, {
