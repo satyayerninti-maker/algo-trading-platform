@@ -19,6 +19,7 @@ const mockStrategies = [
     entry_logic: { condition: 'sma_20 > sma_50', price_type: 'market' },
     exit_logic: { stop_loss_percent: 2.0, profit_target_percent: 5.0 },
     risk_params: { max_positions: 5, position_size_percent: 10.0 },
+    created_at: '2024-03-15',
   },
   {
     id: 2,
@@ -33,6 +34,22 @@ const mockStrategies = [
     entry_logic: { condition: 'price > bb_upper', price_type: 'market' },
     exit_logic: { stop_loss_percent: 1.5, profit_target_percent: 3.0 },
     risk_params: { max_positions: 3, position_size_percent: 8.0 },
+    created_at: '2024-03-10',
+  },
+  {
+    id: 3,
+    name: 'Momentum Breakout',
+    description: 'Entry on price breakout above resistance with volume',
+    instruments: [{ symbol: 'TCS', market: 'NSE', quantity: 1 }, { symbol: 'WIPRO', market: 'NSE', quantity: 1 }],
+    winRate: 55,
+    avgReturn: 5.1,
+    totalTrades: 28,
+    active: false,
+    riskLevel: 'High',
+    entry_logic: { condition: 'breakout + volume', price_type: 'limit' },
+    exit_logic: { stop_loss_percent: 3.0, profit_target_percent: 7.0 },
+    risk_params: { max_positions: 2, position_size_percent: 15.0 },
+    created_at: '2024-03-05',
   },
 ]
 
@@ -42,10 +59,7 @@ export default function StrategiesPage() {
 
   const [strategies, setStrategies] = useState(mockStrategies)
   const [error, setError] = useState<string | null>(null)
-  const [selectedStrategy, setSelectedStrategy] = useState<any | null>(null)
-  const [capital, setCapital] = useState('')
-  const [starting, setStarting] = useState(false)
-  const [showDetailModal, setShowDetailModal] = useState(false)
+  const [activeTab, setActiveTab] = useState<'all' | 'active' | 'paused'>('all')
 
   useEffect(() => {
     if (!accessToken || !userId) return
@@ -62,23 +76,11 @@ export default function StrategiesPage() {
     fetchStrategies()
   }, [accessToken, userId])
 
-  const handleStartStrategy = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!selectedStrategy || !capital || !userId || !accessToken) return
-
-    try {
-      setStarting(true)
-      // Mock API call
-      alert('Strategy started successfully!')
-      setSelectedStrategy(null)
-      setCapital('')
-      setShowDetailModal(false)
-    } catch (err: any) {
-      alert('Failed to start strategy: ' + err.message)
-    } finally {
-      setStarting(false)
-    }
-  }
+  const filteredStrategies = strategies.filter((s) => {
+    if (activeTab === 'active') return s.active
+    if (activeTab === 'paused') return !s.active
+    return true
+  })
 
   const RiskBadge = ({ risk }: { risk: string }) => {
     const colors: Record<string, string> = {
@@ -95,18 +97,26 @@ export default function StrategiesPage() {
 
   const getStrategyIcon = (name: string) => {
     if (name.includes('Mean')) return '🔄'
-    if (name.includes('Average')) return '📊'
+    if (name.includes('Crossover')) return '📊'
     if (name.includes('Momentum')) return '🚀'
+    if (name.includes('Breakout')) return '💥'
     return '⚙️'
   }
 
   return (
     <Layout>
       <div className="space-y-8">
-        {/* Header Section */}
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900">Trading Strategies</h1>
-          <p className="text-gray-600 mt-2">Manage and execute your automated trading strategies</p>
+        {/* Page Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold text-gray-900">Trading Strategies</h1>
+            <p className="text-gray-600 mt-2">Manage and execute your automated trading strategies</p>
+          </div>
+          <Link href="/strategies/create-mean-reversion">
+            <button className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-bold rounded-lg shadow-lg transition transform hover:scale-105">
+              + New Strategy
+            </button>
+          </Link>
         </div>
 
         {/* Summary Stats */}
@@ -125,229 +135,175 @@ export default function StrategiesPage() {
           </div>
         )}
 
-        {/* Create Strategy Promo */}
-        <div className="bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-xl p-6 shadow-lg text-white overflow-hidden relative">
-          <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
-            <div>
-              <h2 className="text-2xl md:text-3xl font-bold mb-2">Create New Strategy</h2>
-              <p className="text-blue-100 mb-4">Build Mean Reversion strategies with AI-powered stock scanning</p>
-              <ul className="text-sm space-y-1 text-blue-50">
-                <li>✓ Automated stock scanner</li>
-                <li>✓ Smart entry/exit rules</li>
-                <li>✓ Real-time execution</li>
-              </ul>
-            </div>
-            <Link href="/strategies/create-mean-reversion">
-              <button className="px-8 py-4 bg-white text-purple-600 font-bold rounded-lg hover:bg-gray-50 transition transform hover:scale-105 shadow-lg whitespace-nowrap">
-                🚀 Start Building
-              </button>
-            </Link>
-          </div>
+        {/* Tabs */}
+        <div className="flex items-center gap-2 border-b border-gray-200">
+          <button
+            onClick={() => setActiveTab('all')}
+            className={`px-4 py-3 font-semibold border-b-2 transition ${
+              activeTab === 'all'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            All Strategies ({strategies.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('active')}
+            className={`px-4 py-3 font-semibold border-b-2 transition ${
+              activeTab === 'active'
+                ? 'border-green-600 text-green-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Active ({strategies.filter(s => s.active).length})
+          </button>
+          <button
+            onClick={() => setActiveTab('paused')}
+            className={`px-4 py-3 font-semibold border-b-2 transition ${
+              activeTab === 'paused'
+                ? 'border-yellow-600 text-yellow-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Paused ({strategies.filter(s => !s.active).length})
+          </button>
         </div>
 
-        {/* Strategies Grid */}
-        <div>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-gray-900">Available Strategies</h2>
-            <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm font-semibold rounded-full">
-              {strategies.length} total
-            </span>
-          </div>
-
-          {strategies.length === 0 ? (
-            <div className="bg-white rounded-lg border-2 border-dashed border-gray-300 p-12 text-center">
+        {/* Strategies Table */}
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+          {filteredStrategies.length === 0 ? (
+            <div className="p-12 text-center">
               <p className="text-4xl mb-4">📭</p>
-              <p className="text-lg font-semibold text-gray-900">No strategies yet</p>
+              <p className="text-lg font-semibold text-gray-900">No strategies found</p>
               <p className="text-gray-600 mt-2">Create your first strategy to get started</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {strategies.map((strategy: any) => (
-                <div
-                  key={strategy.id}
-                  onClick={() => {
-                    setSelectedStrategy(strategy)
-                    setShowDetailModal(true)
-                  }}
-                  className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-xl hover:border-blue-300 transition cursor-pointer transform hover:scale-103"
-                >
-                  {/* Card Header */}
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="text-3xl">{getStrategyIcon(strategy.name)}</div>
-                      <div className="flex-1">
-                        <h3 className="font-bold text-gray-900 text-lg">{strategy.name}</h3>
-                        <p className="text-xs text-gray-500 mt-1">{strategy.instruments.length} instrument(s)</p>
-                      </div>
-                    </div>
-                    {strategy.active && (
-                      <span className="inline-block h-3 w-3 bg-green-500 rounded-full animate-pulse" title="Active"></span>
-                    )}
-                  </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="px-6 py-4 text-left text-sm font-bold text-gray-900">Strategy</th>
+                    <th className="px-6 py-4 text-left text-sm font-bold text-gray-900">Instruments</th>
+                    <th className="px-6 py-4 text-center text-sm font-bold text-gray-900">Win Rate</th>
+                    <th className="px-6 py-4 text-center text-sm font-bold text-gray-900">Avg Return</th>
+                    <th className="px-6 py-4 text-center text-sm font-bold text-gray-900">Trades</th>
+                    <th className="px-6 py-4 text-center text-sm font-bold text-gray-900">Risk</th>
+                    <th className="px-6 py-4 text-center text-sm font-bold text-gray-900">Status</th>
+                    <th className="px-6 py-4 text-center text-sm font-bold text-gray-900">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filteredStrategies.map((strategy: any) => (
+                    <tr key={strategy.id} className="hover:bg-blue-50 transition">
+                      {/* Strategy Name */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">{getStrategyIcon(strategy.name)}</span>
+                          <div>
+                            <p className="font-semibold text-gray-900">{strategy.name}</p>
+                            <p className="text-xs text-gray-600 mt-1">{strategy.description}</p>
+                          </div>
+                        </div>
+                      </td>
 
-                  {/* Description */}
-                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">{strategy.description}</p>
+                      {/* Instruments */}
+                      <td className="px-6 py-4">
+                        <div className="flex flex-wrap gap-1">
+                          {strategy.instruments.map((inst: any, idx: number) => (
+                            <span key={idx} className="inline-block bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded">
+                              {inst.symbol}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
 
-                  {/* Metrics Grid */}
-                  <div className="grid grid-cols-3 gap-3 mb-4 pb-4 border-b border-gray-100">
-                    <div className="text-center">
-                      <p className="text-xs text-gray-500 font-medium">Win Rate</p>
-                      <p className="text-xl font-bold text-green-600 mt-1">{strategy.winRate}%</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-xs text-gray-500 font-medium">Return</p>
-                      <p className="text-xl font-bold text-blue-600 mt-1">{strategy.avgReturn}%</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-xs text-gray-500 font-medium">Trades</p>
-                      <p className="text-xl font-bold text-purple-600 mt-1">{strategy.totalTrades}</p>
-                    </div>
-                  </div>
+                      {/* Win Rate */}
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+                            <span className="text-lg font-bold text-green-600">{strategy.winRate}%</span>
+                          </div>
+                        </div>
+                      </td>
 
-                  {/* Footer */}
-                  <div className="flex items-center justify-between">
-                    <RiskBadge risk={strategy.riskLevel} />
-                    <button className="text-blue-600 hover:text-blue-700 font-semibold text-sm flex items-center gap-1 group">
-                      View Details <span className="group-hover:translate-x-1 transition">→</span>
-                    </button>
-                  </div>
-                </div>
-              ))}
+                      {/* Avg Return */}
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+                            <span className="text-lg font-bold text-blue-600">{strategy.avgReturn}%</span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Total Trades */}
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center">
+                            <span className="text-lg font-bold text-purple-600">{strategy.totalTrades}</span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Risk */}
+                      <td className="px-6 py-4 text-center">
+                        <RiskBadge risk={strategy.riskLevel} />
+                      </td>
+
+                      {/* Status */}
+                      <td className="px-6 py-4 text-center">
+                        {strategy.active ? (
+                          <span className="inline-flex items-center gap-2">
+                            <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse"></span>
+                            <span className="text-sm font-semibold text-green-600">Active</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-2">
+                            <span className="h-2 w-2 bg-yellow-500 rounded-full"></span>
+                            <span className="text-sm font-semibold text-yellow-600">Paused</span>
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Actions */}
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          {strategy.active ? (
+                            <button className="px-3 py-2 bg-red-100 text-red-600 hover:bg-red-200 font-semibold text-sm rounded-lg transition">
+                              Stop
+                            </button>
+                          ) : (
+                            <button className="px-3 py-2 bg-green-100 text-green-600 hover:bg-green-200 font-semibold text-sm rounded-lg transition">
+                              Start
+                            </button>
+                          )}
+                          <button className="px-3 py-2 bg-gray-100 text-gray-600 hover:bg-gray-200 font-semibold text-sm rounded-lg transition">
+                            ⋮
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
-      </div>
 
-      {/* Strategy Detail Modal */}
-      {showDetailModal && selectedStrategy && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-            {/* Modal Header */}
-            <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-purple-600 text-white p-6 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-4xl">{getStrategyIcon(selectedStrategy.name)}</span>
-                <div>
-                  <h2 className="text-2xl font-bold">{selectedStrategy.name}</h2>
-                  <p className="text-blue-100 text-sm">{selectedStrategy.description}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowDetailModal(false)}
-                className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-2 transition"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 space-y-6">
-              {/* Key Metrics */}
-              <div className="grid grid-cols-3 gap-4 bg-gray-50 p-4 rounded-lg">
-                <div className="text-center">
-                  <p className="text-sm text-gray-600 font-medium">Win Rate</p>
-                  <p className="text-3xl font-bold text-green-600 mt-2">{selectedStrategy.winRate}%</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-sm text-gray-600 font-medium">Avg Return</p>
-                  <p className="text-3xl font-bold text-blue-600 mt-2">{selectedStrategy.avgReturn}%</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-sm text-gray-600 font-medium">Total Trades</p>
-                  <p className="text-3xl font-bold text-purple-600 mt-2">{selectedStrategy.totalTrades}</p>
-                </div>
-              </div>
-
-              {/* Instruments */}
-              <div>
-                <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                  📈 Trading Instruments
-                </h3>
-                <div className="space-y-2">
-                  {selectedStrategy.instruments.map((inst: any, idx: number) => (
-                    <div key={idx} className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg">
-                      <div className="w-10 h-10 bg-blue-600 text-white rounded-lg flex items-center justify-center font-bold">
-                        {inst.symbol[0]}
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-semibold text-gray-900">{inst.symbol}</p>
-                        <p className="text-xs text-gray-600">{inst.market}</p>
-                      </div>
-                      <span className="bg-blue-200 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">
-                        Qty: {inst.quantity}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Entry & Exit Rules */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                  <h4 className="font-bold text-green-900 mb-2">📥 Entry Rule</h4>
-                  <p className="text-sm text-green-700">
-                    {typeof selectedStrategy.entry_logic === 'object'
-                      ? selectedStrategy.entry_logic.condition
-                      : selectedStrategy.entry_logic}
-                  </p>
-                </div>
-                <div className="bg-red-50 p-4 rounded-lg border border-red-200">
-                  <h4 className="font-bold text-red-900 mb-2">📤 Exit Rule</h4>
-                  <p className="text-sm text-red-700">
-                    {typeof selectedStrategy.exit_logic === 'object'
-                      ? `SL: ${selectedStrategy.exit_logic.stop_loss_percent}% | PT: ${selectedStrategy.exit_logic.profit_target_percent}%`
-                      : selectedStrategy.exit_logic}
-                  </p>
-                </div>
-              </div>
-
-              {/* Risk Level */}
-              <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                <p className="text-sm text-gray-600 font-medium mb-2">Risk Level</p>
-                <RiskBadge risk={selectedStrategy.riskLevel} />
-              </div>
-
-              {/* Start Strategy Form */}
-              <form onSubmit={handleStartStrategy} className="space-y-4 border-t pt-6">
-                <div>
-                  <label className="block text-sm font-bold text-gray-900 mb-2">
-                    Capital to Allocate (₹)
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="number"
-                      value={capital}
-                      onChange={(e) => setCapital(e.target.value)}
-                      placeholder="Enter amount"
-                      min="1000"
-                      step="1000"
-                      required
-                      className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <p className="text-xs text-gray-600 mt-2">Minimum: ₹1,000 | Recommended: ₹10,000+</p>
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowDetailModal(false)}
-                    className="flex-1 px-4 py-3 border border-gray-300 text-gray-900 font-bold rounded-lg hover:bg-gray-50 transition"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={starting || !capital}
-                    className="flex-1 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-bold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-                  >
-                    {starting ? '⏳ Starting...' : '▶️ Start Strategy'}
-                  </button>
-                </div>
-              </form>
+        {/* Info Box */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+          <div className="flex items-start gap-4">
+            <span className="text-2xl">💡</span>
+            <div>
+              <h3 className="font-bold text-blue-900">Pro Tips</h3>
+              <ul className="text-sm text-blue-800 mt-2 space-y-1">
+                <li>✓ Create multiple strategies to diversify your trading approach</li>
+                <li>✓ Monitor active strategies on the Dashboard</li>
+                <li>✓ Pause strategies to fine-tune parameters without losing history</li>
+              </ul>
             </div>
           </div>
         </div>
-      )}
+      </div>
     </Layout>
   )
 }
