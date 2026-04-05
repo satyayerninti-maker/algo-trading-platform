@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import Layout from '@/components/Layout'
 import StatCard from '@/components/StatCard'
 import { useAuth } from '@/hooks/useAuth'
@@ -99,6 +100,21 @@ export default function StrategiesPage() {
           <StatCard label="Active" value={strategies.filter(s => s.active).length} subtext={`${strategies.filter(s => !s.active).length} paused`} icon="▶️" color="green" />
           <StatCard label="Avg Win Rate" value={`${(strategies.reduce((s, x) => s + x.winRate, 0) / strategies.length).toFixed(1)}%`} icon="🎯" color="purple" />
           <StatCard label="Total Trades" value={strategies.reduce((s, x) => s + x.totalTrades, 0)} subtext="All strategies" icon="📊" color="blue" />
+        </div>
+
+        {/* Create Strategy Button */}
+        <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg p-8 shadow-lg text-white">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold mb-2">🚀 Create a New Strategy</h2>
+              <p className="text-blue-100">Get started with Mean Reversion, a positional strategy for capturing oversold bounces</p>
+            </div>
+            <Link href="/strategies/create-mean-reversion">
+              <button className="px-6 py-3 bg-white text-blue-600 font-semibold rounded-lg hover:bg-gray-100 transition whitespace-nowrap">
+                Create Mean Reversion →
+              </button>
+            </Link>
+          </div>
         </div>
 
         {error && (

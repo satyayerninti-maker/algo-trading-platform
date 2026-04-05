@@ -241,6 +241,12 @@ class ApiClient {
     })
   }
 
+  async scanMeanReversionStocks(token: string) {
+    return this.client.post('/api/strategies/scan/mean-reversion', null, {
+      params: { token },
+    })
+  }
+
   // WebSocket connection
   getWebSocketUrl(token: string): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
