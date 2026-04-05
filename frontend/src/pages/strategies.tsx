@@ -5,76 +5,106 @@ import StatCard from '@/components/StatCard'
 import { useAuth } from '@/hooks/useAuth'
 import { apiClient } from '@/lib/api-client'
 
-const mockStrategies = [
-  {
-    id: 1,
-    name: 'Moving Average Crossover',
-    description: 'Buy when SMA20 > SMA50, Sell when SMA20 < SMA50',
-    instruments: [{ symbol: 'RELIANCE', market: 'NSE', quantity: 1 }],
-    winRate: 62,
-    avgReturn: 4.2,
-    totalTrades: 45,
-    active: true,
-    riskLevel: 'Medium',
-    entry_logic: { condition: 'sma_20 > sma_50', price_type: 'market' },
-    exit_logic: { stop_loss_percent: 2.0, profit_target_percent: 5.0 },
-    risk_params: { max_positions: 5, position_size_percent: 10.0 },
-    created_at: '2024-03-15',
-  },
-  {
-    id: 2,
-    name: 'Mean Reversion',
-    description: 'Reverting to mean when price deviates 2 std devs',
-    instruments: [{ symbol: 'INFY', market: 'NSE', quantity: 2 }],
-    winRate: 58,
-    avgReturn: 3.1,
-    totalTrades: 32,
-    active: true,
-    riskLevel: 'Low',
-    entry_logic: { condition: 'price > bb_upper', price_type: 'market' },
-    exit_logic: { stop_loss_percent: 1.5, profit_target_percent: 3.0 },
-    risk_params: { max_positions: 3, position_size_percent: 8.0 },
-    created_at: '2024-03-10',
-  },
-  {
-    id: 3,
-    name: 'Momentum Breakout',
-    description: 'Entry on price breakout above resistance with volume',
-    instruments: [{ symbol: 'TCS', market: 'NSE', quantity: 1 }, { symbol: 'WIPRO', market: 'NSE', quantity: 1 }],
-    winRate: 55,
-    avgReturn: 5.1,
-    totalTrades: 28,
-    active: false,
-    riskLevel: 'High',
-    entry_logic: { condition: 'breakout + volume', price_type: 'limit' },
-    exit_logic: { stop_loss_percent: 3.0, profit_target_percent: 7.0 },
-    risk_params: { max_positions: 2, position_size_percent: 15.0 },
-    created_at: '2024-03-05',
-  },
-]
-
 export default function StrategiesPage() {
   const { user, accessToken } = useAuth()
   const userId = user?.id
 
-  const [strategies, setStrategies] = useState(mockStrategies)
-  const [error, setError] = useState<string | null>(null)
+  const [strategies, setStrategies] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState<'all' | 'active' | 'paused'>('all')
+  const [stopModal, setStopModal] = useState<{ visible: boolean; strategyId: number | null }>({
+    visible: false,
+    strategyId: null,
+  })
+  const [deleteConfirm, setDeleteConfirm] = useState<{ visible: boolean; strategyId: number | null }>({
+    visible: false,
+    strategyId: null,
+  })
+  const [stopping, setStopping] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (!accessToken || !userId) return
 
     const fetchStrategies = async () => {
       try {
-        const response = await apiClient.listStrategies(userId, accessToken)
-        setStrategies(response.data || [])
+        // Fetch both regular strategies and active execution strategies
+        const [strategiesResponse, activeResponse] = await Promise.all([
+          apiClient.listStrategies(userId, accessToken),
+          apiClient.getActiveStrategies(userId, accessToken),
+        ])
+
+        let allStrategies = strategiesResponse.data || []
+
+        // Mark strategies as active based on execution data
+        if (activeResponse.data && activeResponse.data.length > 0) {
+          const activeStrategyIds = new Set(activeResponse.data.map((a: any) => a.strategy_id))
+          allStrategies = allStrategies.map((s: any) => ({
+            ...s,
+            active: activeStrategyIds.has(s.id),
+          }))
+        }
+
+        // Show real data only - no mock fallback
+        setStrategies(allStrategies)
       } catch (err: any) {
-        setError(err.message)
+        console.error('Error fetching strategies:', err.message)
+        // On error, show empty (no fallback to mock)
+        setStrategies([])
       }
     }
 
+    // Fetch immediately
     fetchStrategies()
+
+    // Auto-refresh every 5 seconds for real-time updates
+    const interval = setInterval(fetchStrategies, 5000)
+
+    return () => clearInterval(interval)
   }, [accessToken, userId])
+
+  const handleStopStrategy = (strategyId: number) => {
+    setStopModal({ visible: true, strategyId })
+  }
+
+  const handleConfirmStop = async (closeTrades: boolean) => {
+    if (!accessToken || !userId || !stopModal.strategyId) return
+
+    try {
+      setStopping(true)
+      await apiClient.stopStrategy(stopModal.strategyId, userId, accessToken, closeTrades)
+      // Update strategy status in local state
+      setStrategies((prev) =>
+        prev.map((s) =>
+          s.id === stopModal.strategyId ? { ...s, active: false } : s
+        )
+      )
+      setStopModal({ visible: false, strategyId: null })
+    } catch (err: any) {
+      alert('Error stopping strategy: ' + err.message)
+    } finally {
+      setStopping(false)
+    }
+  }
+
+  const handleDeleteStrategy = (strategyId: number) => {
+    setDeleteConfirm({ visible: true, strategyId })
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!accessToken || !userId || !deleteConfirm.strategyId) return
+
+    try {
+      setDeleting(true)
+      await apiClient.deleteStrategy(deleteConfirm.strategyId, userId, accessToken)
+      // Remove strategy from local state
+      setStrategies((prev) => prev.filter((s) => s.id !== deleteConfirm.strategyId))
+      setDeleteConfirm({ visible: false, strategyId: null })
+    } catch (err: any) {
+      alert('Error deleting strategy: ' + err.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const filteredStrategies = strategies.filter((s) => {
     if (activeTab === 'active') return s.active
@@ -98,6 +128,7 @@ export default function StrategiesPage() {
   const getStrategyIcon = (name: string) => {
     if (name.includes('Mean')) return '🔄'
     if (name.includes('Crossover')) return '📊'
+    if (name.includes('Golden')) return '⭐'
     if (name.includes('Momentum')) return '🚀'
     if (name.includes('Breakout')) return '💥'
     return '⚙️'
@@ -112,11 +143,28 @@ export default function StrategiesPage() {
             <h1 className="text-4xl font-bold text-gray-900">Trading Strategies</h1>
             <p className="text-gray-600 mt-2">Manage and execute your automated trading strategies</p>
           </div>
-          <Link href="/strategies/create-mean-reversion">
-            <button className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-bold rounded-lg shadow-lg transition transform hover:scale-105">
-              + New Strategy
-            </button>
-          </Link>
+          <div className="flex gap-3">
+            <div className="relative group">
+              <button className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-bold rounded-lg shadow-lg transition transform hover:scale-105">
+                + New Strategy ▼
+              </button>
+              {/* Dropdown Menu */}
+              <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border border-gray-200 opacity-0 group-hover:opacity-100 transition invisible group-hover:visible z-50">
+                <Link href="/strategies/create-mean-reversion">
+                  <div className="px-4 py-3 hover:bg-blue-50 border-b border-gray-200 cursor-pointer transition">
+                    <p className="font-semibold text-gray-900">Mean Reversion</p>
+                    <p className="text-xs text-gray-600 mt-1">RSI below 20, exit on bounce</p>
+                  </div>
+                </Link>
+                <Link href="/strategies/create-golden-ratio">
+                  <div className="px-4 py-3 hover:bg-blue-50 cursor-pointer transition">
+                    <p className="font-semibold text-gray-900">Golden Cross</p>
+                    <p className="text-xs text-gray-600 mt-1">50-SMA {'>'} 200-SMA trend follow</p>
+                  </div>
+                </Link>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Summary Stats */}
@@ -126,14 +174,6 @@ export default function StrategiesPage() {
           <StatCard label="Avg Win Rate" value={`${(strategies.reduce((s, x) => s + x.winRate, 0) / strategies.length).toFixed(1)}%`} icon="🎯" color="purple" />
           <StatCard label="Total Trades" value={strategies.reduce((s, x) => s + x.totalTrades, 0)} subtext="All strategies" icon="📊" color="blue" />
         </div>
-
-        {/* Error Message */}
-        {error && (
-          <div className="p-4 bg-red-100 border-l-4 border-red-500 text-red-700 rounded">
-            <p className="font-semibold">Error</p>
-            <p className="text-sm mt-1">{error}</p>
-          </div>
-        )}
 
         {/* Tabs */}
         <div className="flex items-center gap-2 border-b border-gray-200">
@@ -268,16 +308,23 @@ export default function StrategiesPage() {
                       <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-2">
                           {strategy.active ? (
-                            <button className="px-3 py-2 bg-red-100 text-red-600 hover:bg-red-200 font-semibold text-sm rounded-lg transition">
+                            <button
+                              onClick={() => handleStopStrategy(strategy.id)}
+                              className="px-3 py-2 bg-red-100 text-red-600 hover:bg-red-200 font-semibold text-sm rounded-lg transition"
+                            >
                               Stop
                             </button>
                           ) : (
-                            <button className="px-3 py-2 bg-green-100 text-green-600 hover:bg-green-200 font-semibold text-sm rounded-lg transition">
+                            <button className="px-3 py-2 bg-green-100 text-green-600 hover:bg-green-200 font-semibold text-sm rounded-lg transition cursor-not-allowed opacity-50">
                               Start
                             </button>
                           )}
-                          <button className="px-3 py-2 bg-gray-100 text-gray-600 hover:bg-gray-200 font-semibold text-sm rounded-lg transition">
-                            ⋮
+                          <button
+                            onClick={() => handleDeleteStrategy(strategy.id)}
+                            className="px-3 py-2 bg-gray-100 text-gray-600 hover:bg-red-100 hover:text-red-600 font-semibold text-sm rounded-lg transition"
+                            title="Delete strategy"
+                          >
+                            🗑️
                           </button>
                         </div>
                       </td>
@@ -303,6 +350,79 @@ export default function StrategiesPage() {
             </div>
           </div>
         </div>
+
+        {/* Stop Strategy Modal */}
+        {stopModal.visible && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full mx-4">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">Stop Strategy</h3>
+              <p className="text-gray-600 mb-6">
+                How would you like to stop this strategy?
+              </p>
+              <div className="space-y-3">
+                <button
+                  onClick={() => handleConfirmStop(false)}
+                  disabled={stopping}
+                  className="w-full px-4 py-3 bg-blue-50 border-2 border-blue-300 text-blue-700 font-semibold rounded-lg hover:bg-blue-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {stopping ? '⏳ Processing...' : '📂 Keep Trades Open'}
+                </button>
+                <p className="text-xs text-gray-600 text-center">
+                  Stop the strategy but keep all open trades. You can close them manually later.
+                </p>
+              </div>
+              <div className="border-t my-4"></div>
+              <div className="space-y-3">
+                <button
+                  onClick={() => handleConfirmStop(true)}
+                  disabled={stopping}
+                  className="w-full px-4 py-3 bg-red-50 border-2 border-red-300 text-red-700 font-semibold rounded-lg hover:bg-red-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {stopping ? '⏳ Processing...' : '🔴 Auto-Close All Trades'}
+                </button>
+                <p className="text-xs text-gray-600 text-center">
+                  Stop the strategy and automatically close all trades at current market price.
+                </p>
+              </div>
+              <div className="border-t my-4"></div>
+              <button
+                onClick={() => setStopModal({ visible: false, strategyId: null })}
+                disabled={stopping}
+                className="w-full px-4 py-2 text-gray-600 font-semibold rounded-lg hover:bg-gray-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Strategy Modal */}
+        {deleteConfirm.visible && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full mx-4">
+              <h3 className="text-lg font-bold text-red-900 mb-4">Delete Strategy</h3>
+              <p className="text-gray-600 mb-6">
+                Are you sure you want to delete this strategy? This action cannot be undone.
+              </p>
+              <div className="space-y-3">
+                <button
+                  onClick={handleConfirmDelete}
+                  disabled={deleting}
+                  className="w-full px-4 py-3 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {deleting ? '⏳ Deleting...' : '🗑️ Yes, Delete'}
+                </button>
+                <button
+                  onClick={() => setDeleteConfirm({ visible: false, strategyId: null })}
+                  disabled={deleting}
+                  className="w-full px-4 py-3 bg-gray-100 text-gray-700 font-semibold rounded-lg hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </Layout>
   )

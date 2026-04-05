@@ -247,6 +247,12 @@ class ApiClient {
     })
   }
 
+  async scanGoldenCrossStocks(token: string) {
+    return this.client.post('/api/strategies/scan/golden-cross', null, {
+      params: { token },
+    })
+  }
+
   // WebSocket connection
   getWebSocketUrl(token: string): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

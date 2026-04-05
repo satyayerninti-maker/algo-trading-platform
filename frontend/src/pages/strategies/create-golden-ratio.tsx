@@ -7,19 +7,19 @@ import { apiClient } from '@/lib/api-client'
 interface ScanResult {
   symbol: string
   current_price: number
+  sma_50: number
   sma_200: number
-  rsi_4: number
-  above_sma_200: boolean
+  golden_cross: boolean
 }
 
-export default function CreateMeanReversion() {
+export default function CreateGoldenRatio() {
   const router = useRouter()
   const { accessToken, user } = useAuth()
   const [step, setStep] = useState<'config' | 'scan' | 'select' | 'review'>('config')
   const [scanning, setScanning] = useState(false)
   const [scanResults, setScanResults] = useState<ScanResult[]>([])
   const [selectedStocks, setSelectedStocks] = useState<string[]>([])
-  const [strategyName, setStrategyName] = useState('Mean Reversion Strategy')
+  const [strategyName, setStrategyName] = useState('Golden Cross Strategy')
   const [loading, setLoading] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
 
@@ -30,18 +30,18 @@ export default function CreateMeanReversion() {
     try {
       setScanning(true)
       setScanError(null)
-      console.log('[MeanReversion] Starting scan...')
-      const response = await apiClient.scanMeanReversionStocks(accessToken)
-      console.log('[MeanReversion] Scan results:', response.data)
+      console.log('[GoldenCross] Starting scan...')
+      const response = await apiClient.scanGoldenCrossStocks(accessToken)
+      console.log('[GoldenCross] Scan results:', response.data)
 
       if (response.data.scan_results && response.data.scan_results.length > 0) {
         setScanResults(response.data.scan_results)
         setStep('scan')
       } else {
-        setScanError('No stocks matching criteria found. Try adjusting parameters.')
+        setScanError('No stocks matching criteria found. Try again later.')
       }
     } catch (error: any) {
-      console.error('[MeanReversion] Scan error:', error)
+      console.error('[GoldenCross] Scan error:', error)
       const errorMsg = error.response?.data?.detail || error.message || 'Error scanning stocks'
       setScanError(errorMsg)
     } finally {
@@ -69,25 +69,25 @@ export default function CreateMeanReversion() {
 
     try {
       setLoading(true)
-      console.log('[MeanReversion] Creating strategy with stocks:', selectedStocks)
+      console.log('[GoldenCross] Creating strategy with stocks:', selectedStocks)
 
       // Create strategy
       const strategyData = {
         name: strategyName,
-        description: `Mean Reversion strategy trading ${selectedStocks.join(', ')}`,
+        description: `Golden Cross strategy trading ${selectedStocks.join(', ')}`,
         instruments: selectedStocks.map((symbol) => ({
           symbol,
           market: 'NSE',
           quantity: 1,
         })),
         entry_logic: {
-          condition: 'rsi_4 < 20 && price > sma_200',
+          condition: 'sma_50 > sma_200 (Golden Cross)',
           price_type: 'market',
           timeframe: 'daily',
         },
         exit_logic: {
-          condition: 'rsi_4 > 65',
-          check_interval_minutes: 15,
+          condition: 'sma_50 < sma_200 (Death Cross)',
+          check_interval_minutes: 60,
         },
         risk_params: {
           max_positions: selectedStocks.length,
@@ -96,12 +96,12 @@ export default function CreateMeanReversion() {
       }
 
       const response = await apiClient.createStrategy(strategyData, user.id, accessToken)
-      console.log('[MeanReversion] Strategy created:', response.data)
+      console.log('[GoldenCross] Strategy created:', response.data)
 
       alert('Strategy created successfully!')
       router.push('/strategies')
     } catch (error) {
-      console.error('[MeanReversion] Error creating strategy:', error)
+      console.error('[GoldenCross] Error creating strategy:', error)
       alert('Error creating strategy. Please try again.')
     } finally {
       setLoading(false)
@@ -113,8 +113,8 @@ export default function CreateMeanReversion() {
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Header */}
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Mean Reversion Strategy Builder</h1>
-          <p className="text-gray-600 mt-2">Create a positional mean reversion trading strategy</p>
+          <h1 className="text-3xl font-bold text-gray-900">Golden Cross Strategy Builder</h1>
+          <p className="text-gray-600 mt-2">Create a trend-following golden cross trading strategy</p>
         </div>
 
         {/* Progress Steps */}
@@ -144,6 +144,13 @@ export default function CreateMeanReversion() {
 
             <div className="space-y-6">
               <div>
+                <h3 className="font-semibold text-gray-900 mb-4">What is Golden Cross?</h3>
+                <p className="text-gray-700 mb-4">
+                  A Golden Cross occurs when the 50-day Simple Moving Average crosses above the 200-day Simple Moving Average. This is considered a strong bullish signal indicating a potential long-term uptrend.
+                </p>
+              </div>
+
+              <div>
                 <h3 className="font-semibold text-gray-900 mb-4">Entry Rules</h3>
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
                   <div className="flex items-start gap-3">
@@ -160,8 +167,8 @@ export default function CreateMeanReversion() {
                       ✓
                     </span>
                     <div>
-                      <p className="font-medium text-gray-900">Price {'>'} 200-Day SMA</p>
-                      <p className="text-sm text-gray-600">Ensures position is above long-term trend</p>
+                      <p className="font-medium text-gray-900">50-Day SMA {'>'} 200-Day SMA</p>
+                      <p className="text-sm text-gray-600">Golden Cross signal - bullish trend confirmation</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
@@ -169,8 +176,8 @@ export default function CreateMeanReversion() {
                       ✓
                     </span>
                     <div>
-                      <p className="font-medium text-gray-900">RSI(4) Daily {'<'} 20</p>
-                      <p className="text-sm text-gray-600">Identifies oversold conditions for mean reversion</p>
+                      <p className="font-medium text-gray-900">Strong Uptrend</p>
+                      <p className="text-sm text-gray-600">Price above both moving averages for confirmation</p>
                     </div>
                   </div>
                 </div>
@@ -184,8 +191,8 @@ export default function CreateMeanReversion() {
                       ✓
                     </span>
                     <div>
-                      <p className="font-medium text-gray-900">RSI(4) Daily {'>'} 65</p>
-                      <p className="text-sm text-gray-600">Exit when stock recovers. Checked every 15 minutes</p>
+                      <p className="font-medium text-gray-900">50-Day SMA {'<'} 200-Day SMA (Death Cross)</p>
+                      <p className="text-sm text-gray-600">Exit when bearish signal appears. Checked hourly</p>
                     </div>
                   </div>
                 </div>
@@ -214,7 +221,7 @@ export default function CreateMeanReversion() {
         {step === 'scan' && (
           <div className="bg-white rounded-lg border border-gray-200 p-8 shadow-sm">
             <h2 className="text-xl font-bold text-gray-900 mb-6">
-              Scan Results - Top 5 Oversold Stocks
+              Scan Results - Golden Cross Stocks
             </h2>
 
             <div className="overflow-x-auto">
@@ -228,10 +235,13 @@ export default function CreateMeanReversion() {
                       Current Price
                     </th>
                     <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">
-                      200-Day SMA
+                      50-Day SMA
                     </th>
                     <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">
-                      RSI(4)
+                      200-Day SMA
+                    </th>
+                    <th className="px-6 py-3 text-center text-sm font-semibold text-gray-900">
+                      Golden Cross
                     </th>
                     <th className="px-6 py-3 text-center text-sm font-semibold text-gray-900">
                       Select
@@ -248,12 +258,21 @@ export default function CreateMeanReversion() {
                         ₹{result.current_price.toFixed(2)}
                       </td>
                       <td className="px-6 py-4 text-sm text-right text-gray-600">
+                        ₹{result.sma_50.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-right text-gray-600">
                         ₹{result.sma_200.toFixed(2)}
                       </td>
-                      <td className={`px-6 py-4 text-sm text-right font-semibold ${
-                        result.rsi_4 < 20 ? 'text-red-600' : 'text-gray-600'
-                      }`}>
-                        {result.rsi_4.toFixed(2)}
+                      <td className="px-6 py-4 text-center">
+                        {result.golden_cross ? (
+                          <span className="inline-block px-3 py-1 bg-green-100 text-green-800 text-xs font-bold rounded-full">
+                            ✓ YES
+                          </span>
+                        ) : (
+                          <span className="inline-block px-3 py-1 bg-gray-100 text-gray-800 text-xs font-bold rounded-full">
+                            ✗ NO
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-center">
                         <input
@@ -325,17 +344,17 @@ export default function CreateMeanReversion() {
                 <div>
                   <h3 className="font-semibold text-gray-900 mb-2">Entry Rules</h3>
                   <div className="bg-gray-50 p-3 rounded text-sm text-gray-700 space-y-1">
-                    <p>• Price {'>'} 200-Day SMA</p>
-                    <p>• RSI(4) Daily {'<'} 20</p>
+                    <p>• 50-Day SMA {'>'} 200-Day SMA</p>
+                    <p>• Golden Cross Signal</p>
                     <p>• Nifty Top 200 only</p>
                   </div>
                 </div>
                 <div>
                   <h3 className="font-semibold text-gray-900 mb-2">Exit Rules</h3>
                   <div className="bg-gray-50 p-3 rounded text-sm text-gray-700 space-y-1">
-                    <p>• RSI(4) Daily {'>'} 65</p>
-                    <p>• Check: Every 15 mins</p>
-                    <p>• Type: Positional</p>
+                    <p>• 50-Day SMA {'<'} 200-Day SMA</p>
+                    <p>• Death Cross Signal</p>
+                    <p>• Check: Hourly</p>
                   </div>
                 </div>
               </div>
