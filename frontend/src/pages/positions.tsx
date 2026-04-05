@@ -1,8 +1,22 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Layout from '@/components/Layout'
 import StatCard from '@/components/StatCard'
+import { useAuth } from '@/hooks/useAuth'
+import { apiClient } from '@/lib/api-client'
 
-const mockPositions = [
+interface Position {
+  id: string | number
+  symbol: string
+  qty: number
+  entry: number
+  current: number
+  pnl: number
+  pnlPct: number
+  strategy: string
+  date: string
+}
+
+const mockPositions: Position[] = [
   { id: 1, symbol: 'RELIANCE', qty: 10, entry: 2850, current: 3000, pnl: 1500, pnlPct: 5.26, strategy: 'MA Crossover', date: '2024-04-05' },
   { id: 2, symbol: 'INFY', qty: 15, entry: 1450, current: 1420, pnl: -450, pnlPct: -2.07, strategy: 'Mean Reversion', date: '2024-04-05' },
   { id: 3, symbol: 'TCS', qty: 8, entry: 3500, current: 3635, pnl: 1080, pnlPct: 3.86, strategy: 'Momentum', date: '2024-04-04' },
@@ -11,9 +25,59 @@ const mockPositions = [
 ]
 
 export default function Positions() {
+  const { accessToken } = useAuth()
+  const [positions, setPositions] = useState<Position[]>(mockPositions)
   const [filter, setFilter] = useState('all')
 
-  const filtered = filter === 'all' ? mockPositions : filter === 'wins' ? mockPositions.filter(p => p.pnl > 0) : mockPositions.filter(p => p.pnl < 0)
+  useEffect(() => {
+    const fetchPositions = async () => {
+      if (!accessToken) return
+
+      try {
+        console.log('[Positions] Fetching real positions from Zerodha...')
+        const response = await apiClient.getZerodhaPositions(accessToken)
+        console.log('[Positions] API Response:', response.data)
+
+        // Parse Zerodha positions data
+        let positionsData: Position[] = []
+
+        if (response.data?.data?.net) {
+          // Net positions (overnight positions)
+          positionsData = response.data.data.net.map((pos: any, idx: number) => ({
+            id: pos.instrument_token || idx,
+            symbol: pos.tradingsymbol || 'UNKNOWN',
+            qty: pos.quantity || 0,
+            entry: pos.average_price || 0,
+            current: pos.last_price || 0,
+            pnl: (pos.last_price - pos.average_price) * pos.quantity || 0,
+            pnlPct: pos.quantity > 0 ? ((pos.last_price - pos.average_price) / pos.average_price * 100) : 0,
+            strategy: 'Active', // Zerodha doesn't provide strategy info
+            date: new Date().toISOString().split('T')[0],
+          }))
+          console.log('[Positions] Parsed', positionsData.length, 'positions')
+        }
+
+        // Only update if we have real positions
+        if (positionsData.length > 0) {
+          console.log('[Positions] Showing real positions')
+          setPositions(positionsData)
+        } else {
+          console.log('[Positions] No positions, showing mock data')
+          setPositions(mockPositions)
+        }
+      } catch (error) {
+        console.error('[Positions] Error fetching positions:', error)
+        setPositions(mockPositions)
+      }
+    }
+
+    fetchPositions()
+    // Refresh every 5 seconds
+    const interval = setInterval(fetchPositions, 5000)
+    return () => clearInterval(interval)
+  }, [accessToken])
+
+  const filtered = filter === 'all' ? positions : filter === 'wins' ? positions.filter(p => p.pnl > 0) : positions.filter(p => p.pnl < 0)
   const totalPnl = filtered.reduce((sum, p) => sum + p.pnl, 0)
   const winCount = filtered.filter(p => p.pnl > 0).length
   const avgReturn = filtered.length > 0 ? (filtered.reduce((sum, p) => sum + p.pnlPct, 0) / filtered.length).toFixed(2) : 0
@@ -67,11 +131,11 @@ export default function Positions() {
                   <tr key={pos.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 text-sm font-semibold text-gray-900">{pos.symbol}</td>
                     <td className="px-6 py-4 text-sm text-center text-gray-600">{pos.qty}</td>
-                    <td className="px-6 py-4 text-sm text-right text-gray-600">₹{pos.entry.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-sm text-right font-semibold text-gray-900">₹{pos.current.toLocaleString()}</td>
+                    <td className="px-6 py-4 text-sm text-right text-gray-600">₹{Math.round(pos.entry).toLocaleString()}</td>
+                    <td className="px-6 py-4 text-sm text-right font-semibold text-gray-900">₹{Math.round(pos.current).toLocaleString()}</td>
                     <td className="px-6 py-4 text-sm text-gray-600">{pos.strategy}</td>
                     <td className={`px-6 py-4 text-sm text-right font-semibold ${pos.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {pos.pnl >= 0 ? '+' : ''}₹{pos.pnl.toLocaleString()}
+                      {pos.pnl >= 0 ? '+' : ''}₹{Math.round(pos.pnl).toLocaleString()}
                     </td>
                     <td className={`px-6 py-4 text-sm text-right font-semibold ${pos.pnlPct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                       {pos.pnlPct >= 0 ? '+' : ''}{pos.pnlPct.toFixed(2)}%
