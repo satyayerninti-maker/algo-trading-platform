@@ -1,0 +1,27 @@
+name: "Moving Average Crossover - Intraday"
+description: "Simple moving average crossover strategy for intraday trading"
+
+instruments:
+  - symbol: "RELIANCE"
+    quantity: 1
+    market: "NSE"
+  - symbol: "INFY"
+    quantity: 2
+    market: "NSE"
+
+entry_logic:
+  condition: "sma_20 > sma_50"
+  price_type: "market"
+  min_volume: 1000000
+
+exit_logic:
+  stop_loss_percent: 2.0
+  profit_target_percent: 5.0
+  time_based_exit: "15:30"
+  trailing_stop_percent: 1.5
+
+risk_params:
+  max_positions: 5
+  position_size_percent: 10.0
+  max_loss_per_day: 5000
+  max_daily_trades: 10
