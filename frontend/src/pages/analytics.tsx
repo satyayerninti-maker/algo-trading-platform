@@ -49,15 +49,28 @@ export default function Analytics() {
   useEffect(() => {
     const fetchAnalytics = async () => {
       if (!accessToken) {
+        console.log('[Analytics] No access token, skipping fetch')
         return
       }
 
       try {
+        console.log('[Analytics] Fetching with token:', accessToken.substring(0, 20) + '...')
         const response = await apiClient.getZerodhaAnalytics(accessToken)
-        setAnalyticsData(response.data.daily_data)
-        setSummary(response.data.summary)
+        console.log('[Analytics] API Response:', response.data)
+
+        // Only update with API data if we have records, otherwise keep mock data
+        const data = response.data
+        if (data.daily_data && data.daily_data.length > 0) {
+          console.log('[Analytics] Using API data with', data.daily_data.length, 'records')
+          setAnalyticsData(data.daily_data)
+          setSummary(data.summary)
+        } else {
+          console.log('[Analytics] No trade data from Zerodha, showing mock data')
+          setAnalyticsData(mockAnalyticsData)
+          setSummary(mockSummary)
+        }
       } catch (error) {
-        console.error('Error fetching analytics:', error)
+        console.error('[Analytics] Error fetching analytics:', error)
         // Fallback to mock data
         setAnalyticsData(mockAnalyticsData)
         setSummary(mockSummary)

@@ -85,7 +85,7 @@ def zerodha_callback(request_token: str, db: Session = Depends(get_db)):
     try:
         # Redirect back to frontend with request_token
         # Frontend will handle exchanging it for access_token with user's JWT token
-        frontend_url = "http://localhost:3002/broker"
+        frontend_url = "http://localhost:3000/broker"
         params = {"request_token": request_token, "status": "authenticated"}
         redirect_url = f"{frontend_url}?{urlencode(params)}"
         return RedirectResponse(url=redirect_url)
